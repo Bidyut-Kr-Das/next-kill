@@ -111,9 +111,15 @@ function render() {
   ];
   for (let i = scroll; i < Math.min(items.length, scroll + listH); i++) {
     const it = items[i];
-    const tag = { idle: '', deleting: color(33, ' deleting…'), deleted: color(32, ' deleted'), error: color(31, ' error') }[it.status];
-    const line = `${fmt(it.size).padStart(9)}  ${it.rel.slice(0, cols - 22)}`;
-    lines.push((i === cursor ? color(7, line) : it.status === 'deleted' ? color(2, line) : line) + tag);
+    // Path left, size right-aligned to the edge. Width cols - 1 so the terminal never auto-wraps.
+    const tag = { idle: '', deleting: '  deleting…', deleted: '  deleted', error: '  error' }[it.status];
+    const fg = { idle: 39, deleting: 33, deleted: 32, error: 31 }[it.status];
+    const size = fmt(it.size);
+    const room = Math.max(4, cols - 4 - tag.length - size.length);
+    const path = it.rel.length > room ? '…' + it.rel.slice(-(room - 1)) : it.rel; // keep the tail, it's the useful part
+    const gap = ' '.repeat(Math.max(1, cols - 3 - path.length - tag.length - size.length));
+    const line = ` ${path}${ESC}${fg}m${tag}${ESC}39m${gap}${size} `; // 39 = reset fg only, keeps inverse
+    lines.push(i === cursor ? color(7, line) : it.status === 'deleted' ? color(2, line) : line);
   }
   if (!items.length && scanTime !== undefined) lines.push('  no .next folders found');
   while (lines.length < rows - 1) lines.push('');

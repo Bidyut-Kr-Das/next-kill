@@ -1,0 +1,42 @@
+{
+  "name": "next-kill",
+  "version": "0.1.0",
+  "description": "Find and delete .next build folders fast. Like npkill, for Next.js.",
+  "type": "module",
+  "bin": {
+    "next-kill": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "!dist/*.test.*"
+  ],
+  "engines": {
+    "node": ">=18.14"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node --test dist/*.test.js",
+    "bench": "tsc && node bench/bench.mjs",
+    "prepare": "tsc"
+  },
+  "keywords": [
+    "next",
+    "nextjs",
+    ".next",
+    "clean",
+    "npkill",
+    "disk",
+    "cli",
+    "cache"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bidyut-kr-das/next-kill.git"
+  },
+  "homepage": "https://github.com/bidyut-kr-das/next-kill#readme"
+}

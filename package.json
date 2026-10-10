@@ -1,10 +1,10 @@
 {
-  "name": "next-kill",
+  "name": "cache-kill",
   "version": "0.1.0",
-  "description": "Find and delete .next build folders fast. Like npkill, for Next.js.",
+  "description": "Find and delete build and cache folders fast: .next, .nuxt, target, __pycache__, .gradle and more. Like npkill, for build output.",
   "type": "module",
   "bin": {
-    "next-kill": "dist/index.js"
+    "cache-kill": "dist/index.js"
   },
   "files": [
     "dist",
@@ -20,14 +20,22 @@
     "prepare": "tsc"
   },
   "keywords": [
-    "next",
-    "nextjs",
-    ".next",
+    "cache",
     "clean",
-    "npkill",
+    "build",
     "disk",
     "cli",
-    "cache"
+    "npkill",
+    "next",
+    "nextjs",
+    "nuxt",
+    "sveltekit",
+    "angular",
+    "rust",
+    "python",
+    "gradle",
+    "flutter",
+    "dotnet"
   ],
   "license": "MIT",
   "devDependencies": {
@@ -36,7 +44,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bidyut-kr-das/next-kill.git"
+    "url": "git+https://github.com/Bidyut-Kr-Das/cache-kill.git"
   },
-  "homepage": "https://github.com/bidyut-kr-das/next-kill#readme"
+  "homepage": "https://github.com/Bidyut-Kr-Das/cache-kill#readme"
 }

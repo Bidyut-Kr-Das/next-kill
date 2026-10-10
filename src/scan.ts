@@ -1,10 +1,12 @@
-import { readdir, lstat, rename, rm } from 'node:fs/promises';
+import { access, readdir, lstat, rename, rm } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
+import { RULES, type Rule } from './rules.js';
 
-const TARGET = '.next';
-const SKIP = new Set(['node_modules', '.git']);
-const TMP_PREFIX = '.next-kill-';
+// Never walked into. Unconditional cache names are pruned even when filtered out by --only/--exclude:
+// nothing worth finding lives inside them, and walking them is slow.
+const SKIP = new Set(['node_modules', '.git', ...RULES.filter((r) => !r.marker && !r.inside).map((r) => r.name)]);
+const TMP_PREFIX = '.cache-kill-';
 const RM_OPTS = { recursive: true, force: true, maxRetries: 3 } as const;
 
 export const CONCURRENCY = Number(process.env.UV_THREADPOOL_SIZE ?? 4) * 2;
@@ -26,8 +28,28 @@ export function limit(n: number) {
   };
 }
 
-/** Walk `root`, calling `onFound` for every `.next` dir. Never descends into `.next`, `node_modules` or `.git`. */
-export async function find(root: string, onFound: (path: string) => void, run = limit(CONCURRENCY)) {
+/** First rule whose marker/inside condition holds for dir `p`, or undefined. */
+async function pick(candidates: Rule[], p: string, siblings: string[], run: ReturnType<typeof limit>) {
+  for (const rule of candidates) {
+    if (rule.marker && !siblings.some((n) => rule.marker!.test(n))) continue;
+    if (rule.inside && !(await run(() => access(join(p, rule.inside!))).then(() => true, () => false))) continue;
+    return rule;
+  }
+}
+
+/**
+ * Walk `root`, calling `onFound` for every dir matching `rules`. Matched dirs are not descended into.
+ * Never walks `node_modules`, `.git` or symlinks.
+ */
+export async function find(
+  root: string,
+  onFound: (path: string, rule: Rule) => void,
+  rules: Rule[] = RULES,
+  run = limit(CONCURRENCY),
+) {
+  const byName = new Map<string, Rule[]>();
+  for (const rule of rules) byName.set(rule.name, [...(byName.get(rule.name) ?? []), rule]);
+
   const walk = async (dir: string): Promise<void> => {
     let entries;
     try {
@@ -35,12 +57,21 @@ export async function find(root: string, onFound: (path: string) => void, run = 
     } catch {
       return; // EACCES, EPERM, ENOENT (deleted mid-scan), ...
     }
+    let siblings: string[] | undefined; // built only when this dir has a candidate
     const subs: Promise<void>[] = [];
     for (const e of entries) {
       if (!e.isDirectory()) continue; // symlinks report false, so never followed
       const p = join(dir, e.name);
-      if (e.name === TARGET) onFound(p);
-      else if (!SKIP.has(e.name) && !e.name.startsWith(TMP_PREFIX)) subs.push(walk(p));
+      const skip = SKIP.has(e.name) || e.name.startsWith(TMP_PREFIX);
+      const candidates = byName.get(e.name);
+      if (!candidates) {
+        if (!skip) subs.push(walk(p));
+        continue;
+      }
+      siblings ??= entries.filter((x) => !x.isDirectory()).map((x) => x.name);
+      subs.push(
+        pick(candidates, p, siblings, run).then((rule) => (rule ? onFound(p, rule) : skip ? undefined : walk(p))),
+      );
     }
     await Promise.all(subs);
   };

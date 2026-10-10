@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 const run = promisify(execFile);
 const PROJECTS = Number(process.argv.find((a) => a.startsWith('projects='))?.split('=')[1] ?? 60);
 const scanJs = new URL('../dist/scan.js', import.meta.url).href;
-const root = await mkdtemp(join(tmpdir(), 'next-kill-bench-'));
+const root = await mkdtemp(join(tmpdir(), 'cache-kill-bench-'));
 
 async function tree(dir, dirs, filesPer, depth) {
   await mkdir(dir, { recursive: true });

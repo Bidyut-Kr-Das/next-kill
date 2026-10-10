@@ -4,24 +4,38 @@ import { readFile, stat } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
 import readline from 'node:readline';
 import { parseArgs } from 'node:util';
+import { IDS, RULES } from './rules.js';
 import { CONCURRENCY, dirSize, find, limit, remove } from './scan.js';
 
-const HELP = `next-kill [dir]
+const HELP = `cache-kill [dir] [options]
 
-Find every .next folder under dir (default: current dir) and delete the ones you pick.
-Skips node_modules and .git.
+Find build/cache folders (.next, .nuxt, target, __pycache__, ...) under dir
+(default: current dir) and delete the ones you pick. Skips node_modules and .git.
+
+Options:
+  --only <ids>      only these types, comma separated (e.g. --only next,rust)
+  --exclude <ids>   skip these types (e.g. --exclude python)
+  --list-types      show every type and the folders it matches
+  -h, --help        show this help
+  -v, --version     show version
 
 Keys:  up/down, j/k, pgup/pgdn, home/end   move
-       space / delete                      delete selected .next
+       space / delete                      delete selected folder
        q / esc / ctrl+c                    quit
 `;
 
 type Status = 'idle' | 'deleting' | 'deleted' | 'error';
-type Item = { path: string; rel: string; size?: number; status: Status };
+type Item = { path: string; rel: string; label: string; size?: number; status: Status };
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' } },
+  options: {
+    help: { type: 'boolean', short: 'h' },
+    version: { type: 'boolean', short: 'v' },
+    only: { type: 'string' },
+    exclude: { type: 'string' },
+    'list-types': { type: 'boolean' },
+  },
 });
 
 if (values.help) {
@@ -33,10 +47,32 @@ if (values.version) {
   console.log(pkg.version);
   process.exit(0);
 }
+if (values['list-types']) {
+  for (const id of IDS) {
+    const desc = RULES.filter((r) => r.id === id).map((r) => r.name + (r.marker ? ` (next to ${r.marker.source.replace(/[\\^$]/g, '')})` : r.inside ? ` (with ${r.inside})` : ''));
+    console.log(`${id.padEnd(14)}${desc.join(', ')}`);
+  }
+  process.exit(0);
+}
+
+function ids(flag: string | undefined) {
+  if (flag === undefined) return undefined;
+  const list = flag.split(',').map((s) => s.trim()).filter(Boolean);
+  const bad = list.filter((id) => !IDS.includes(id));
+  if (bad.length) {
+    console.error(`cache-kill: unknown type: ${bad.join(', ')}
+valid types: ${IDS.join(', ')}`);
+    process.exit(1);
+  }
+  return list;
+}
+const only = ids(values.only);
+const exclude = ids(values.exclude) ?? [];
+const rules = RULES.filter((r) => (!only || only.includes(r.id)) && !exclude.includes(r.id));
 
 const root = resolve(positionals[0] ?? '.');
 if (!(await stat(root).catch(() => null))?.isDirectory()) {
-  console.error(`next-kill: not a directory: ${root}`);
+  console.error(`cache-kill: not a directory: ${root}`);
   process.exit(1);
 }
 
@@ -49,19 +85,20 @@ function fmt(bytes?: number) {
 }
 
 const items: Item[] = [];
-const rel = (p: string) => relative(root, p) || `.${sep}.next`;
 const sizeRun = limit(CONCURRENCY);
 const started = performance.now();
+const scan = (onItem: () => void = () => {}) =>
+  find(root, (path, rule) => (items.push({ path, rel: relative(root, path), label: rule.label, status: 'idle' }), onItem()), rules);
 
 if (!process.stdout.isTTY || !process.stdin.isTTY) {
   // Pipe mode: list only, never deletes.
-  await find(root, (path) => items.push({ path, rel: rel(path), status: 'idle' }));
+  await scan();
   let total = 0;
   await Promise.all(
     items.map(async (it) => {
       const size = await dirSize(it.path, sizeRun);
       total += size; // safe: size already awaited
-      console.log(`${fmt(size).padStart(9)}  ${it.rel}`);
+      console.log(`${fmt(size).padStart(9)}  ${it.label.padEnd(13)}  ${it.rel}`);
     }),
   );
   console.log(`${fmt(total).padStart(9)}  total, ${items.length} folders`);
@@ -77,11 +114,11 @@ const out = process.stdout;
 const ESC = '\x1b[';
 const color = (code: number, s: string) => `${ESC}${code}m${s}${ESC}0m`;
 const BANNER = [
-  '█   █ █████ █   █ █████    █   █ ███ █     █',
-  '██  █ █      █ █    █      █  █   █  █     █',
-  '█ █ █ ████    █     █      ███    █  █     █',
-  '█  ██ █      █ █    █      █  █   █  █     █',
-  '█   █ █████ █   █   █      █   █ ███ █████ █████',
+  ' ████  ███   ████ █   █ █████    █   █ ███ █     █',
+  '█     █   █ █     █   █ █        █  █   █  █     █',
+  '█     █████ █     █████ ████     ███    █  █     █',
+  '█     █   █ █     █   █ █        █  █   █  █     █',
+  ' ████ █   █  ████ █   █ █████    █   █ ███ █████ █████',
 ];
 const BYLINE = 'by Bidyut Kr. Das';
 
@@ -105,7 +142,7 @@ function render() {
       : `scanned in ${(scanTime / 1000).toFixed(2)}s`;
   const lines = [
     ...banner,
-    `${banner.length ? '' : color(1, 'next-kill') + '  '}${root}  ${state}`,
+    `${banner.length ? '' : color(1, 'cache-kill') + '  '}${root}  ${state}`,
     `found ${items.length}  ·  total ${fmt(sum())}  ·  freed ${color(32, fmt(sum('deleted')))}`,
     '',
   ];
@@ -115,13 +152,14 @@ function render() {
     const tag = { idle: '', deleting: '  deleting…', deleted: '  deleted', error: '  error' }[it.status];
     const fg = { idle: 39, deleting: 33, deleted: 32, error: 31 }[it.status];
     const size = fmt(it.size);
-    const room = Math.max(4, cols - 4 - tag.length - size.length);
+    const label = `  ${it.label}`;
+    const room = Math.max(4, cols - 4 - label.length - tag.length - size.length);
     const path = it.rel.length > room ? '…' + it.rel.slice(-(room - 1)) : it.rel; // keep the tail, it's the useful part
-    const gap = ' '.repeat(Math.max(1, cols - 3 - path.length - tag.length - size.length));
-    const line = ` ${path}${ESC}${fg}m${tag}${ESC}39m${gap}${size} `; // 39 = reset fg only, keeps inverse
+    const gap = ' '.repeat(Math.max(1, cols - 3 - path.length - label.length - tag.length - size.length));
+    const line = ` ${path}${ESC}36m${label}${ESC}${fg}m${tag}${ESC}39m${gap}${size} `; // 39 = reset fg only, keeps inverse
     lines.push(i === cursor ? color(7, line) : it.status === 'deleted' ? color(2, line) : line);
   }
-  if (!items.length && scanTime !== undefined) lines.push('  no .next folders found');
+  if (!items.length && scanTime !== undefined) lines.push('  nothing to clean');
   while (lines.length < rows - 1) lines.push('');
   lines.push(color(2, 'up/down move · space delete · q quit'));
   out.write(`${ESC}H` + lines.map((l) => l + `${ESC}K`).join('\n'));
@@ -142,7 +180,7 @@ function cleanup() {
 function exit(code = 0) {
   cleanup();
   const freed = items.reduce((a, it) => a + (it.status === 'deleted' ? (it.size ?? 0) : 0), 0);
-  if (freed) console.log(`next-kill: freed ${fmt(freed)}`);
+  if (freed) console.log(`cache-kill: freed ${fmt(freed)}`);
   process.exit(code);
 }
 
@@ -196,10 +234,7 @@ process.stdin.on('keypress', (_s, key: readline.Key) => {
 });
 
 render();
-await find(root, (path) => {
-  items.push({ path, rel: rel(path), status: 'idle' });
-  schedule();
-});
+await scan(schedule);
 scanTime = performance.now() - started;
 render();
 // Sizes only after scan, so the scan gets the whole threadpool.
